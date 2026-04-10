@@ -64,8 +64,7 @@ app.add_middleware(
 
 # Resolve the static directory relative to this file's location
 _STATIC_DIR = Path(__file__).parent.parent / "static"
-if _STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 
 @app.get("/")
