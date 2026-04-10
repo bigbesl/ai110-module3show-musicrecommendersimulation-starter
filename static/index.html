@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WaveForm Web</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="logo">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+        <rect x="2" y="10" width="3" height="8" rx="1.5" fill="#ff6b6b"/>
+        <rect x="7" y="5" width="3" height="18" rx="1.5" fill="#ff6b6b"/>
+        <rect x="12" y="2" width="3" height="24" rx="1.5" fill="#4ecdc4"/>
+        <rect x="17" y="7" width="3" height="14" rx="1.5" fill="#4ecdc4"/>
+        <rect x="22" y="12" width="3" height="6" rx="1.5" fill="#ffd700"/>
+      </svg>
+      <span>WaveForm Web</span>
+    </div>
+
+    <button id="history-btn" type="button" title="Search history" aria-label="Search history">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <polyline points="12 6 12 12 16 14"/>
+      </svg>
+    </button>
+
+    <form id="search-form" autocomplete="off">
+      <div class="search-wrap">
+        <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input
+          id="search-input"
+          type="text"
+          placeholder="Search a song or artist…"
+          spellcheck="false"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded="false"
+          aria-controls="search-dropdown"
+        />
+        <div id="audio-wave" class="audio-wave" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+      </div>
+    </form>
+  </header>
+
+  <!-- Dynamic background layer -->
+  <div id="bg-layer" class="bg-layer">
+    <div id="bg-color" class="bg-color"></div>
+    <div id="bg-video-wrap" class="bg-video-wrap">
+      <iframe id="bg-iframe" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+    </div>
+  </div>
+
+  <!-- Graph canvas -->
+  <main id="graph-container">
+
+    <!-- Empty state -->
+    <div id="empty-state" class="empty-state">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+        <circle cx="32" cy="32" r="30" stroke="#4ecdc4" stroke-width="2" stroke-dasharray="6 4" opacity="0.4"/>
+        <circle cx="32" cy="32" r="6" fill="#ff6b6b" opacity="0.7"/>
+        <circle cx="14" cy="20" r="4" fill="#4ecdc4" opacity="0.5"/>
+        <circle cx="50" cy="20" r="4" fill="#4ecdc4" opacity="0.5"/>
+        <circle cx="14" cy="44" r="4" fill="#a8a8c0" opacity="0.5"/>
+        <circle cx="50" cy="44" r="4" fill="#a8a8c0" opacity="0.5"/>
+        <line x1="32" y1="32" x2="14" y2="20" stroke="#4ecdc4" stroke-width="1.5" opacity="0.4"/>
+        <line x1="32" y1="32" x2="50" y2="20" stroke="#4ecdc4" stroke-width="1.5" opacity="0.4"/>
+        <line x1="32" y1="32" x2="14" y2="44" stroke="#a8a8c0" stroke-width="1" stroke-dasharray="4 3" opacity="0.4"/>
+        <line x1="32" y1="32" x2="50" y2="44" stroke="#a8a8c0" stroke-width="1" stroke-dasharray="4 3" opacity="0.4"/>
+      </svg>
+      <p>Search for a song to explore its sonic universe</p>
+    </div>
+
+    <!-- Loading spinner -->
+    <div id="spinner" class="spinner hidden">
+      <div class="spinner-ring"></div>
+      <p>Mapping the sonic web…</p>
+    </div>
+
+    <!-- Error message -->
+    <div id="error-msg" class="error-msg hidden">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ff6b6b" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <p id="error-text">Song not found. Try a different title.</p>
+    </div>
+
+    <!-- D3 SVG injected here by app.js -->
+    <svg id="graph-svg"></svg>
+
+    <!-- Floating tooltip -->
+    <div id="tooltip" class="tooltip hidden">
+      <img id="tooltip-art" src="" alt="" />
+      <div class="tooltip-info">
+        <div id="tooltip-title" class="tooltip-title"></div>
+        <div id="tooltip-artist" class="tooltip-artist"></div>
+        <div id="tooltip-genre" class="tooltip-genre"></div>
+        <div id="tooltip-playing" class="tooltip-playing hidden">
+          <span class="dot"></span> Now playing…
+        </div>
+        <div id="tooltip-no-preview" class="tooltip-no-preview hidden">No preview available</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Legend -->
+  <aside class="legend">
+    <div class="legend-item active" data-filter="all"><span class="dot seed"></span> All</div>
+    <div class="legend-item" data-filter="seed"><span class="dot seed"></span> Your song</div>
+    <div class="legend-item" data-filter="artist_match"><span class="dot artist"></span> Same artist</div>
+    <div class="legend-item" data-filter="album_match"><span class="dot album"></span> Same album</div>
+    <div class="legend-item" data-filter="style_match"><span class="dot style"></span> Similar style</div>
+    <div class="legend-item" data-filter="top_pick"><span class="dot pick"></span> Top pick</div>
+  </aside>
+
+  <!-- History panel -->
+  <div id="history-panel" class="history-panel hidden">
+    <div class="history-header">
+      <span>Recent searches</span>
+      <button id="history-clear" type="button">Clear</button>
+    </div>
+    <div id="history-list" class="history-list">
+      <!-- items injected by app.js -->
+    </div>
+  </div>
+
+  <!-- Search dropdown – outside header to avoid backdrop-filter stacking context clipping -->
+  <div id="search-dropdown" class="search-dropdown hidden" role="listbox">
+    <!-- items injected by app.js -->
+  </div>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

@@ -1,3 +1,6 @@
 pandas
 pytest
 streamlit
+fastapi
+uvicorn[standard]
+httpx
