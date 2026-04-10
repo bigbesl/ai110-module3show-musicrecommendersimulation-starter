@@ -33,7 +33,8 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 # Persist YouTube video ID cache to disk so server restarts don't re-burn quota
-_YT_CACHE_FILE = Path(__file__).parent.parent / ".yt_cache.json"
+# Use /tmp on Vercel (read-only filesystem), fall back to repo root locally
+_YT_CACHE_FILE = Path("/tmp/.yt_cache.json") if os.path.isdir("/tmp") else Path(__file__).parent.parent / ".yt_cache.json"
 
 def _load_yt_cache() -> dict:
     try:
@@ -63,7 +64,8 @@ app.add_middleware(
 
 # Resolve the static directory relative to this file's location
 _STATIC_DIR = Path(__file__).parent.parent / "static"
-app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+if _STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 
 @app.get("/")
