@@ -1,47 +1,83 @@
-# 🎵 Music Recommender Simulation
+# 🎵 WaveForm Web
 
 ## Project Summary
 
-This project simulates how a basic music recommendation system works using content-based filtering. Given a user's taste profile — their preferred genre, mood, energy level, and valence — the system scores every song in the catalog and returns the top-k matches ranked by relevance. It mirrors the logic behind real platforms like Spotify's "Radio" feature, but intentionally simplified so the decision process is transparent and easy to inspect.
+WaveForm Web is a music discovery app that lets you search any song and explore its "sonic universe" — a live, interactive graph of related tracks, artists, and albums built from real streaming data. When you hover over any node in the graph, a 30-second Deezer preview plays and the background transforms: a music video plays silently behind the graph, or the album's dominant color washes across the screen as a fallback. Genres are detected automatically using a multi-source pipeline (iTunes → MusicBrainz → Deezer) and displayed on hover. Recent searches are saved locally so you can jump back to previous sessions instantly.
 
 ---
 
 ## How The System Works
 
-Real-world recommenders like Spotify or YouTube use a combination of **collaborative filtering** (what similar users listened to) and **content-based filtering** (matching song attributes to your taste). This simulation focuses entirely on content-based filtering.
+Most music apps treat recommendations as a black box. WaveForm makes the connections visible — every edge in the graph has a reason: same artist, same album, stylistically similar, or algorithmically recommended. You can filter by node type to isolate just the relationships that matter to you.
 
-**Algorithm Recipe**
+**Graph Construction**
 
-Each song is scored against the user profile using four rules:
+When you search a song, the backend fetches data from Deezer's public API and builds a force-directed graph:
 
-| Rule | Points |
+| Node type | What it represents |
 |---|---|
-| Genre match | +2.0 |
-| Mood match | +1.0 |
-| Energy similarity `(1 - abs(song_energy - target_energy))` | 0.0 – 1.0 |
-| Valence similarity `(1 - abs(song_valence - target_valence))` | 0.0 – 1.0 |
+| `your-song` | The track you searched |
+| `same-artist` | Other songs by the same artist from Deezer |
+| `same-album` | Other tracks from the same album |
+| `similar-style` | Deezer's "related tracks" for that song |
+| `top-pick` | Top-charting tracks by the same artist |
 
-Songs are then sorted from highest to lowest score, and the top-k are returned with explanations.
+Edges connect nodes that share an artist, album, or recommendation relationship. The graph is laid out using D3's force simulation so clusters naturally emerge — an artist's catalog pulls together, similar-style tracks orbit nearby.
 
-**Key objects:**
+**Genre Detection Pipeline**
 
-- `Song` — stores id, title, artist, genre, mood, energy, tempo_bpm, valence, danceability, acousticness
-- `UserProfile` — stores favorite_genre, favorite_mood, target_energy, likes_acoustic
-- `Recommender` — OOP class that wraps a song list and exposes `recommend()` and `explain_recommendation()`
-- `score_song` / `recommend_songs` — functional API used by the CLI runner
+Genre labels are resolved in three tiers, falling through to the next if the previous returns nothing useful:
+
+```
+1. iTunes Search API  ← most accurate for mainstream + Asian artists
+         ↓ (fallback)
+2. MusicBrainz tags   ← crowdsourced, filtered to tags with ≥ 2 votes
+         ↓ (fallback)
+3. Deezer genre field ← broad category only
+```
+
+MusicBrainz queries use `artist:"name" AND recording:"title"` for disambiguation, so artists with common names (e.g. "MIKE", "Jay") resolve to the correct person.
+
+**Background Visuals Pipeline**
+
+On hover, the backend runs two tasks in parallel:
+
+```
+Hover event
+     ├─ Canvas API extracts dominant color from album art (immediate)
+     │        ↓
+     │   Radial gradient fills background as fallback
+     │
+     └─ yt-dlp searches YouTube for official music video (async)
+              ↓ (if found)
+         YouTube embed plays muted in background, color gradient hides
+```
+
+YouTube results are cached to disk so repeat searches are instant. The Deezer 30-second audio preview plays over the video — the video is always muted.
+
+**Key modules:**
+
+- `src/api.py` — FastAPI app; serves the graph endpoint, YouTube lookup, and static files
+- `src/graph_builder.py` — fetches Deezer data and assembles the D3-compatible node/link JSON
+- `src/itunes_client.py` — iTunes + Deezer genre detection with persistent HTTP clients
+- `src/musicbrainz_client.py` — MusicBrainz tag lookup with rate limiting and disambiguation
+- `static/app.js` — D3 force graph, hover audio/video logic, legend filters, search history
+- `static/index.html` / `static/style.css` — dark-themed single-page UI
 
 **Data flow:**
 
 ```
-Input (User Prefs)
+User types a song
       ↓
-Loop over every song in songs.csv
+GET /api/graph?song=...
       ↓
-score_song() → (numeric score, list of reasons)
+Deezer search → top track → related tracks + artist tracks + album tracks
       ↓
-Sort all songs by score descending
+attach_genres() runs iTunes/MB/Deezer in parallel per node
       ↓
-Return top-k (song, score, explanation)
+D3 force graph renders nodes + links
+      ↓
+Hover → Deezer preview plays + background video or color loads
 ```
 
 ---
@@ -67,8 +103,10 @@ Return top-k (song, score, explanation)
 3. Run the app:
 
    ```bash
-   py src/main.py
+   py -m uvicorn src.api:app --port 8011
    ```
+
+4. Open `http://localhost:8011` in your browser.
 
 ### Running Tests
 
@@ -78,28 +116,30 @@ py -m pytest
 
 ---
 
-## Experiments You Tried
+## Design Decisions Worth Noting
 
-**Profile variety test** — Running three profiles (High-Energy Pop, Chill Lofi, Intense Rock) confirmed the genre weight (+2.0) is the dominant factor. Every profile's top results matched genre first, then used mood and energy as tiebreakers.
+**iTunes-first genre detection** — Deezer's genre field is too broad ("Pop", "Rap/Hip Hop"). iTunes returns specific subgenres like "Alternative Rap" or "City Pop" and handles non-English artist names far better than MusicBrainz.
 
-**Genre-weight halved (2.0 → 1.0)** — When genre weight was reduced, energy and valence similarity became much more influential. A "pop/happy" user started seeing synthwave and indie pop songs in their top 3 because the energy profiles were very close. Results felt less "correct" to genre fans but more musically adventurous.
+**yt-dlp over YouTube Data API** — The YouTube Data API costs 100 quota units per search with a 10,000/day cap, which burns through in a single debug session. yt-dlp fetches the same data with no API key and no quota. Videos are filtered to exclude lyric videos, audio-only uploads, covers, reactions, and live performances — only official music videos pass.
 
-**Mood removed** — Removing the mood check had the smallest impact. Songs that matched genre and energy tended to also share mood, suggesting mood and genre are correlated in this small dataset.
+**Disk-persistent YouTube cache** — Video IDs are cached to `.yt_cache.json` so re-hovering the same song or restarting the server doesn't re-search YouTube.
+
+**`_currentHoverId` race prevention** — Fetching a YouTube video takes 1–3 seconds. If the user moves to a different node before the fetch completes, the stale result is discarded instead of overwriting the new node's background.
 
 ---
 
 ## Limitations and Risks
 
-- The catalog is only 20 songs, so genre-heavy scoring creates a "filter bubble" — a rock fan will see only 3 rock songs recycled every time.
-- The system has no memory; it cannot learn from skips or replays.
-- Genres like funk and country have only one song, so users with those preferences get poor results.
-- Valence and danceability are scored equally even though different listeners weight them very differently.
-- No diversity penalty — the same artist can appear multiple times in the top 5.
+- Deezer previews are capped at 30 seconds — there is no way to play full tracks without a Deezer OAuth token.
+- yt-dlp search quality depends on YouTube's organic results; obscure tracks may surface the wrong video.
+- MusicBrainz has limited coverage for non-English artists; iTunes is a better source but also has gaps.
+- The graph shows up to ~15 nodes to keep the layout readable; very prolific artists get truncated.
+- No user accounts or persistent preferences — the graph resets on every search.
 
 ---
 
 ## Reflection
 
-See [model_card.md](model_card.md) for a full analysis of strengths, biases, and future work.
+See [model_card.md](model_card.md) for a full analysis of the original simulation's strengths, biases, and future work.
 
-Recommenders feel "smart" but are really just math on numbers. The surprising part of building this was realizing how much the **weight choices** — not the data — determine the personality of the system. Doubling the genre weight made it feel like a genre radio station; halving it made it feel more like a mood mixer. Real platforms likely tune these weights using millions of skip/replay signals, which is a form of learning this simulation completely lacks.
+The jump from a scored CSV recommender to a live graph was mostly about embracing external APIs as a data source rather than a local dataset. The surprising design problem wasn't the graph layout or the audio — it was **genre detection**. A single song title like "Leadbelly" or an artist name like "MIKE" can match dozens of wrong entries across iTunes, Deezer, and MusicBrainz. The solution — anchoring every genre query to both artist name and song title, then requiring multi-vote consensus on MusicBrainz tags — is less elegant than a single API call but far more accurate. Real platforms solve this with canonical identifiers (Spotify track IDs, ISRCs); this app has to reconstruct that disambiguation from scratch on every search.
