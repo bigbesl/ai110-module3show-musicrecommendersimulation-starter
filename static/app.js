@@ -462,18 +462,16 @@ async function triggerBackground(d) {
   bgVideoWrap.style.opacity = "0";
   clearTimeout(_bgVideoTimeout);
 
-  // Always start color extraction immediately — it shows even if YouTube is slow
-  if (d.artworkUrl) {
-    extractDominantColor(d.artworkUrl).then(color => {
+  // Always show a color gradient immediately — extract from artwork or use default teal
+  (d.artworkUrl ? extractDominantColor(d.artworkUrl) : Promise.resolve("rgb(78,205,196)"))
+    .then(color => {
       if (_currentHoverId !== myId) return;
-      // Only apply color if no video is already showing
       if (bgVideoWrap.style.opacity === "0" || bgVideoWrap.style.opacity === "") {
         bgColor.style.background =
           `radial-gradient(ellipse 80% 60% at 50% 40%, ${color}60 0%, transparent 70%)`;
         bgColor.style.opacity = "1";
       }
     });
-  }
 
   // Try YouTube in parallel — if it finds a video, it replaces the color
   try {

@@ -132,7 +132,7 @@ def _yt_search_sync(query: str, artist: str, title: str) -> str | None:
     import yt_dlp
     try:
         with yt_dlp.YoutubeDL(_YDL_OPTS) as ydl:
-            result = ydl.extract_info(f"ytsearch5:{query}", download=False)
+            result = ydl.extract_info(f"ytsearch8:{query}", download=False)
             entries = result.get("entries", []) if result else []
             for entry in entries:
                 if not entry:
@@ -169,6 +169,7 @@ async def youtube_video(
     queries = [
         f"{artist} {title} official video",
         f"{artist} {title} music video",
+        f"{artist} {title} vevo",
     ]
 
     from concurrent.futures import ThreadPoolExecutor
