@@ -129,23 +129,38 @@ def _is_real_mv(video_title: str, artist: str, title: str) -> bool:
 
 def _yt_search_sync(query: str, artist: str, title: str) -> str | None:
     """Run yt-dlp search synchronously — called in a thread pool."""
-    import yt_dlp
     try:
         with yt_dlp.YoutubeDL(_YDL_OPTS) as ydl:
             result = ydl.extract_info(f"ytsearch5:{query}", download=False)
             entries = result.get("entries", []) if result else []
-            for entry in entries:
+
+            def _vid_id(entry):
+                vid = entry.get("id") or entry.get("url", "")
+                if "/" in vid:
+                    vid = vid.split("v=")[-1].split("/")[-1]
+                return vid
+
+            # First pass: prefer entries from a VEVO channel (always official)
+            for entry in (entries or []):
+                if not entry:
+                    continue
+                channel = (entry.get("channel") or entry.get("uploader") or "").lower()
+                vtitle  = entry.get("title") or ""
+                vid     = _vid_id(entry)
+                if vid and "vevo" in channel and (
+                    artist.lower() in vtitle.lower() or title.lower() in vtitle.lower()
+                ):
+                    return vid
+
+            # Second pass: keyword-filtered non-VEVO entries
+            for entry in (entries or []):
                 if not entry:
                     continue
                 vtitle = entry.get("title") or ""
-                vid    = entry.get("id") or entry.get("url", "")
-                # Strip full URL down to ID if needed
-                if "/" in vid:
-                    vid = vid.split("v=")[-1].split("/")[-1]
+                vid    = _vid_id(entry)
                 if vid and _is_real_mv(vtitle, artist, title):
                     return vid
     except Exception as e:
-        import logging
         logging.getLogger("api").warning(f"yt-dlp search failed for '{query}': {e}")
     return None
 

@@ -463,12 +463,12 @@ async function triggerBackground(d) {
   clearTimeout(_bgVideoTimeout);
 
   // Always show a color gradient immediately — extract from artwork or use default teal
-  (d.artworkUrl ? extractDominantColor(d.artworkUrl) : Promise.resolve("rgb(78,205,196)"))
+  (d.artworkUrl ? extractDominantColor(d.artworkUrl) : Promise.resolve("rgba(78,205,196,0.55)"))
     .then(color => {
       if (_currentHoverId !== myId) return;
       if (bgVideoWrap.style.opacity === "0" || bgVideoWrap.style.opacity === "") {
         bgColor.style.background =
-          `radial-gradient(ellipse 80% 60% at 50% 40%, ${color}60 0%, transparent 70%)`;
+          `radial-gradient(ellipse 80% 60% at 50% 40%, ${color} 0%, transparent 70%)`;
         bgColor.style.opacity = "1";
       }
     });
@@ -510,10 +510,10 @@ async function extractDominantColor(url) {
         c.width = 10; c.height = 10;
         c.getContext("2d").drawImage(img, 0, 0, 10, 10);
         const px = c.getContext("2d").getImageData(4, 4, 1, 1).data;
-        resolve(`rgb(${px[0]},${px[1]},${px[2]})`);
-      } catch { resolve("rgb(78,205,196)"); }
+        resolve(`rgba(${px[0]},${px[1]},${px[2]},0.55)`);
+      } catch { resolve("rgba(78,205,196,0.55)"); }
     };
-    img.onerror = () => resolve("rgb(78,205,196)");
+    img.onerror = () => resolve("rgba(78,205,196,0.55)");
     img.src = url;
   });
 }
