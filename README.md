@@ -268,6 +268,92 @@ This project was built collaboratively with Claude (Anthropic). Claude contribut
 
 ---
 
+## Stretch Goals
+
+### RAG Enhancement — Multi-Source Retrieval
+
+The genre detection pipeline is a multi-source retrieval system. Rather than relying on a single knowledge base, the system queries three external sources in sequence and synthesizes the best available answer:
+
+- **iTunes Search API** — queried first with `artist + title` anchoring to avoid ambiguous matches
+- **MusicBrainz** — queried using Lucene syntax (`artist:"name" AND recording:"title"`) to retrieve community-tagged genre labels, filtered to entries with ≥ 2 votes
+- **Deezer genre field** — used as a last-resort fallback when the above return nothing
+
+This mirrors the RAG pattern: instead of retrieving from a vector database, the system retrieves from live knowledge APIs and returns the most specific, highest-confidence answer. The retrieval is not static — it runs on every graph load, so new tags added to MusicBrainz are reflected immediately.
+
+**Where it lives:** `src/itunes_client.py` → `attach_genres()`, `src/musicbrainz_client.py` → `get_artist_genre()`
+
+---
+
+### Agentic Workflow — Multi-Step Reasoning Chain
+
+The graph build and hover pipeline is an agentic workflow with branching decision steps:
+
+```
+Step 1  Search Deezer for seed track by name
+           ↓
+Step 2  Spawn 3 parallel retrieval tasks:
+        artist_match pool | album_match pool | style_match pool
+           ↓
+Step 3  For each node, run genre detection chain:
+        try iTunes → if empty, try MusicBrainz → if empty, use Deezer
+           ↓
+Step 4  User hovers a node → decision point:
+        fetch YouTube video ID (async)
+           ↓
+Step 5  If video found → display muted iframe
+        If not found   → extract album color via Canvas API → display gradient
+```
+
+Each step uses the output of the previous step to decide what to do next. The genre chain in Step 3 is a planning loop — it stops as soon as a satisfactory result is found rather than always querying all three sources. Step 5 is a tool-use decision: the system calls an external tool (yt-dlp) and chooses between two rendering paths based on the result.
+
+**Where it lives:** `src/graph_builder.py`, `src/api.py` → `youtube_video()`, `static/app.js` → `triggerBackground()`
+
+---
+
+### Specialization Behavior — Constrained Output Filtering
+
+The system applies two layers of specialized output constraints:
+
+**`_is_real_mv()` classifier** — a constrained filter applied to every YouTube search result before accepting it. It rejects results whose titles contain keywords associated with non-official content: lyric videos, audio-only uploads, covers, karaoke, reactions, slowed/reverbed edits, nightcore, and live performances. Only results where the artist or title appears in the video title AND no disqualifying keyword is present are accepted.
+
+```python
+_NOT_MV = {"lyrics", "lyric", "audio", "visualizer", "cover", "karaoke",
+           "reaction", "slowed", "reverb", "nightcore", "live at", "live in",
+           "concert", "tour", "interview", "behind the scenes", "making of"}
+```
+
+**MusicBrainz vote threshold** — genre tags with fewer than 2 community votes are discarded. This constrains the system to only use genre labels that have been validated by multiple independent contributors, filtering out joke entries, one-off tags, and venue names.
+
+Both constraints specialize system behavior: without them the outputs would be inconsistent and often wrong. With them, the system reliably returns official music videos and specific, accurate genre labels.
+
+**Where it lives:** `src/api.py` → `_is_real_mv()`, `src/musicbrainz_client.py` → `get_artist_genre()`
+
+---
+
+### Test Harness
+
+The project includes a pytest-based test suite in `tests/test_recommender.py` that evaluates the original recommendation engine on predefined inputs and verifies expected behavior:
+
+| Test | Input | Expected output | Pass condition |
+|---|---|---|---|
+| `test_recommend_returns_songs_sorted_by_score` | Profile: genre=pop, mood=happy, energy=0.8 | Top result is the pop/happy song | `results[0].genre == "pop"` |
+| `test_explain_recommendation_returns_non_empty_string` | Same profile + pop song | Non-empty explanation string | `isinstance(explanation, str) and explanation.strip() != ""` |
+
+Run the full suite:
+
+```bash
+py -m pytest tests/ -v
+```
+
+Expected output:
+```
+tests/test_recommender.py::test_recommend_returns_songs_sorted_by_score PASSED
+tests/test_recommender.py::test_explain_recommendation_returns_non_empty_string PASSED
+2 passed in 0.12s
+```
+
+---
+
 ## Design Decisions Worth Noting
 
 **iTunes-first genre detection** — Deezer's genre field is too broad ("Pop", "Rap/Hip Hop"). iTunes returns specific subgenres like "Alternative Rap" or "City Pop" and handles non-English artist names far better than MusicBrainz.
