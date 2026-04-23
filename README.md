@@ -153,6 +153,12 @@ py -m pytest
 
 ---
 
+## Demo Video
+
+<!-- Add your walkthrough video link here -->
+
+---
+
 ## Demo Walkthrough
 
 The following inputs demonstrate full end-to-end system behavior:
