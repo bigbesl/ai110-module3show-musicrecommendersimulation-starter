@@ -1,14 +1,57 @@
 # 🎵 WaveForm Web
 
+## Base Project
+
+This project extends the **AI110 Music Recommender Simulation** — a content-based filtering system that scored songs against a user profile using genre, mood, energy, and valence weights and returned ranked top-k matches from a local CSV catalog. That system was a CLI-only tool with no external data, no audio, and no visualization. WaveForm Web replaces the static CSV lookup with live streaming APIs, adds an interactive visual graph, and integrates real audio previews and music video playback.
+
+---
+
 ## Project Summary
 
-WaveForm Web is a music discovery app that lets you search any song and explore its "sonic universe" — a live, interactive graph of related tracks, artists, and albums built from real streaming data. When you hover over any node in the graph, a 30-second Deezer preview plays and the background transforms: a music video plays silently behind the graph, or the album's dominant color washes across the screen as a fallback. Genres are detected automatically using a multi-source pipeline (iTunes → MusicBrainz → Deezer) and displayed on hover. Recent searches are saved locally so you can jump back to previous sessions instantly.
+WaveForm Web is a music discovery app that lets you search any song and explore its "sonic universe" — a live, interactive graph of related tracks, artists, and albums built from real streaming data. When you hover over any node in the graph, a 30-second Deezer preview plays and the background transforms: a music video plays silently behind the graph, or the album's dominant color washes across the screen as a fallback. Genres are detected automatically using a multi-source AI pipeline (iTunes → MusicBrainz → Deezer) and displayed on hover. Recent searches are saved locally so you can jump back to previous sessions instantly.
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TD
+    User([Browser]) -->|types song name| FE[Frontend\napp.js · D3.js]
+
+    FE -->|GET /api/graph?song=| API[FastAPI\nsrc/api.py]
+    API -->|search + related tracks| Deezer[(Deezer\nPublic API)]
+    Deezer -->|tracks + album art + preview URLs| API
+
+    API -->|attach_genres per node| GP[Genre Pipeline]
+    GP -->|artist + title query| iTunes[(iTunes\nSearch API)]
+    GP -->|artist AND recording query| MB[(MusicBrainz\nAPI)]
+    GP -->|fallback genre field| Deezer
+
+    API -->|nodes + links JSON| FE
+    FE -->|renders| Graph[D3 Force Graph]
+
+    Graph -->|hover event| Hover[Hover Handler]
+    Hover -->|Deezer previewUrl| Audio[Audio Preview\n30s clip]
+    Hover -->|GET /api/youtube?artist=&title=| API
+    API -->|yt-dlp search| YT[(YouTube\nyt-dlp)]
+    YT -->|video ID| API
+    API -->|videoId or null| Hover
+    Hover -->|videoId found| BgVideo[Muted Video\nBackground]
+    Hover -->|null: Canvas API| BgColor[Album Color\nGradient]
+
+    FE -->|read/write| LS[(localStorage\nsearch history)]
+```
+
+**Major components:**
+- `src/api.py` — FastAPI app; `/api/graph`, `/api/youtube`, `/api/suggest` endpoints
+- `src/graph_builder.py` — builds D3-compatible node/link JSON from Deezer data
+- `src/itunes_client.py` — iTunes + Deezer genre detection, persistent HTTP client
+- `src/musicbrainz_client.py` — MusicBrainz tag lookup, rate limiting, artist disambiguation
+- `static/app.js` — D3 force simulation, hover audio/video logic, legend filters, search history
 
 ---
 
 ## How The System Works
-
-Most music apps treat recommendations as a black box. WaveForm makes the connections visible — every edge in the graph has a reason: same artist, same album, stylistically similar, or algorithmically recommended. You can filter by node type to isolate just the relationships that matter to you.
 
 **Graph Construction**
 
@@ -17,16 +60,16 @@ When you search a song, the backend fetches data from Deezer's public API and bu
 | Node type | What it represents |
 |---|---|
 | `your-song` | The track you searched |
-| `same-artist` | Other songs by the same artist from Deezer |
+| `same-artist` | Other songs by the same artist |
 | `same-album` | Other tracks from the same album |
 | `similar-style` | Deezer's "related tracks" for that song |
 | `top-pick` | Top-charting tracks by the same artist |
 
-Edges connect nodes that share an artist, album, or recommendation relationship. The graph is laid out using D3's force simulation so clusters naturally emerge — an artist's catalog pulls together, similar-style tracks orbit nearby.
+Edges connect nodes that share an artist, album, or recommendation relationship. Clusters naturally emerge — an artist's catalog pulls together, similar-style tracks orbit nearby.
 
-**Genre Detection Pipeline**
+**Genre Detection Pipeline (AI Feature)**
 
-Genre labels are resolved in three tiers, falling through to the next if the previous returns nothing useful:
+The core AI feature is a multi-source genre detection pipeline that uses three external knowledge bases in sequence:
 
 ```
 1. iTunes Search API  ← most accurate for mainstream + Asian artists
@@ -36,11 +79,11 @@ Genre labels are resolved in three tiers, falling through to the next if the pre
 3. Deezer genre field ← broad category only
 ```
 
-MusicBrainz queries use `artist:"name" AND recording:"title"` for disambiguation, so artists with common names (e.g. "MIKE", "Jay") resolve to the correct person.
+This is an AI-powered feature because it uses semantic disambiguation — the same query `MIKE` returns dozens of artists, but querying `artist:"MIKE" AND recording:"Leadbelly"` on MusicBrainz narrows to the correct underground rapper. The pipeline produces specific subgenre labels ("Alternative Rap", "City Pop", "Hypnagogic Pop") rather than coarse buckets, which meaningfully changes the tooltip data shown on every node hover.
 
 **Background Visuals Pipeline**
 
-On hover, the backend runs two tasks in parallel:
+On hover, the frontend runs two tasks in parallel:
 
 ```
 Hover event
@@ -55,15 +98,6 @@ Hover event
 
 YouTube results are cached to disk so repeat searches are instant. The Deezer 30-second audio preview plays over the video — the video is always muted.
 
-**Key modules:**
-
-- `src/api.py` — FastAPI app; serves the graph endpoint, YouTube lookup, and static files
-- `src/graph_builder.py` — fetches Deezer data and assembles the D3-compatible node/link JSON
-- `src/itunes_client.py` — iTunes + Deezer genre detection with persistent HTTP clients
-- `src/musicbrainz_client.py` — MusicBrainz tag lookup with rate limiting and disambiguation
-- `static/app.js` — D3 force graph, hover audio/video logic, legend filters, search history
-- `static/index.html` / `static/style.css` — dark-themed single-page UI
-
 **Data flow:**
 
 ```
@@ -71,13 +105,16 @@ User types a song
       ↓
 GET /api/graph?song=...
       ↓
-Deezer search → top track → related tracks + artist tracks + album tracks
+Deezer search → top track → related + artist + album tracks (parallel)
       ↓
-attach_genres() runs iTunes/MB/Deezer in parallel per node
+attach_genres() resolves iTunes/MB/Deezer in parallel per node
       ↓
-D3 force graph renders nodes + links
+D3 force graph renders nodes + links in browser
       ↓
-Hover → Deezer preview plays + background video or color loads
+Hover → Deezer preview plays + yt-dlp fetches video ID in background
+      ↓
+Video found → muted YouTube iframe fills background
+No video   → Canvas extracts album color → radial gradient fills background
 ```
 
 ---
@@ -116,6 +153,115 @@ py -m pytest
 
 ---
 
+## Demo Walkthrough
+
+The following inputs demonstrate full end-to-end system behavior:
+
+### Input 1 — Mainstream pop
+
+**Search:** `Uptown Funk`
+
+**Expected output:**
+- Seed node: *Uptown Funk — Mark Ronson ft. Bruno Mars*, Genre: `Pop`
+- ~5 same-artist nodes (other Bruno Mars songs), ~4 same-album nodes, ~4 similar-style nodes
+- Hover seed node → official music video plays in background, Deezer 30s preview starts
+- Graph layout: Bruno Mars cluster on one side, similar-style pop tracks orbiting outward
+
+### Input 2 — Underground hip-hop
+
+**Search:** `Leadbelly MIKE`
+
+**Expected output:**
+- Seed node: *Leadbelly — MIKE*, Genre: `Alternative Rap`
+- Related nodes from MIKE's catalog and underground hip-hop adjacents
+- Hover → album color gradient (no major-label MV available for many nodes)
+- Genre correctly disambiguated to MIKE the rapper, not a blues artist
+
+### Input 3 — Indie / alternative
+
+**Search:** `Motion Sickness Phoebe Bridgers`
+
+**Expected output:**
+- Seed node: *Motion Sickness — Phoebe Bridgers*, Genre: `Indie Folk` or `Indie Pop`
+- Same-album tracks from *Stranger in the Alps*
+- Similar-style nodes: other indie-folk artists surfaced via Deezer's related-tracks API
+- Hover → music video or warm amber/brown album color gradient
+
+**Sample API response** for `GET /api/graph?song=Uptown+Funk` (abbreviated):
+
+```json
+{
+  "nodes": [
+    {
+      "id": "116090910",
+      "label": "Uptown Funk",
+      "artist": "Mark Ronson",
+      "genre": "Pop",
+      "nodeType": "seed",
+      "artworkUrl": "https://cdns-images.dzcdn.net/images/cover/...",
+      "previewUrl": "https://cdns-images.dzcdn.net/stream/..."
+    },
+    {
+      "id": "67238732",
+      "label": "Just The Way You Are",
+      "artist": "Bruno Mars",
+      "genre": "Pop",
+      "nodeType": "same-artist",
+      ...
+    }
+  ],
+  "links": [
+    { "source": "116090910", "target": "67238732", "linkType": "same-artist" }
+  ]
+}
+```
+
+---
+
+## Reliability Mechanisms
+
+The system includes several reliability mechanisms that prevent failures from degrading the user experience:
+
+**1. Multi-tier genre fallback**
+If iTunes returns no match (e.g. very obscure artist), the system falls through to MusicBrainz, then to Deezer's coarse genre field. No node ever displays a blank genre — there is always a label, even if less specific.
+
+**2. Disk-persistent YouTube cache (`.yt_cache.json`)**
+Every resolved video ID is written to disk immediately after lookup. On server restart, past results are loaded back into memory. This prevents redundant searches and ensures the system degrades gracefully under high load — cached results return in under 1ms.
+
+**3. `_currentHoverId` race guard**
+YouTube video fetches take 1–5 seconds. If the user moves to a different node before the fetch resolves, the result is silently discarded via a token comparison (`_currentHoverId !== myId`). Without this, rapid hovering would cause stale video IDs to flash in the background of the wrong node.
+
+**4. Color gradient fallback**
+The Canvas API begins extracting the album's dominant color the instant a hover starts — before the YouTube fetch even begins. If no video is found (or the fetch errors), the color gradient is already visible. The background is never empty.
+
+**5. MusicBrainz vote threshold**
+MusicBrainz tags require ≥ 2 community votes to be used. This filters out joke tags, venue names, and one-off entries (e.g. "Relic Inn" appeared as a single-vote tag for Bruno Mars before this threshold was applied).
+
+**6. Rate limiting on MusicBrainz**
+A `Semaphore(2)` + 350ms delay between requests prevents MusicBrainz from rate-limiting the server when building a large graph. Without this, genre detection for 15 nodes in parallel would trigger HTTP 429 responses.
+
+---
+
+## AI Use in Development
+
+This project was built collaboratively with Claude (Anthropic). Claude contributed to architecture decisions, debugging, and code generation throughout development.
+
+**Helpful AI suggestions:**
+
+- **`_currentHoverId` pattern**: When rapid hovering caused stale async video fetches to overwrite the wrong node's background, Claude suggested a token-comparison guard — each hover sets a unique ID, and any async callback checks whether that ID is still current before writing to the DOM. This was a non-obvious solution to a real race condition that would have required significant debugging without AI assistance.
+
+- **`asyncio.gather` for parallel genre detection**: Claude suggested running iTunes, MusicBrainz, and Deezer lookups concurrently per node using `asyncio.gather`, cutting graph build time from ~8 seconds to ~2 seconds for a 15-node graph. The approach also suggested batching all nodes together so the three APIs are queried in parallel across nodes, not sequentially.
+
+- **MusicBrainz Lucene query format**: Claude suggested the `artist:"name" AND recording:"title"` Lucene syntax for MusicBrainz, which correctly disambiguates artists with common names. A plain name search for "MIKE" returned blues musicians and session players before this fix.
+
+**Flawed AI suggestions:**
+
+- **YouTube Data API v3**: Claude initially recommended using the YouTube Data API v3 (official, well-documented). This was integrated and worked during testing, but the 10,000-unit daily quota was exhausted in a single debug session (each search costs 100 units). The entire feature broke and had to be rebuilt using yt-dlp, which has no quota. The original recommendation failed to account for development-time usage burning through production quota.
+
+- **VEVO fallback query**: Claude suggested adding a third yt-dlp search query (`"{artist} {title} vevo"`) and increasing the result count from 5 to 8, reasoning that VEVO-hosted videos would rank higher with explicit mention. In practice, this changed the ranking of results in a way that caused previously-working video selections to return the wrong video for several songs. The change had to be reverted.
+
+---
+
 ## Design Decisions Worth Noting
 
 **iTunes-first genre detection** — Deezer's genre field is too broad ("Pop", "Rap/Hip Hop"). iTunes returns specific subgenres like "Alternative Rap" or "City Pop" and handles non-English artist names far better than MusicBrainz.
@@ -135,6 +281,7 @@ py -m pytest
 - MusicBrainz has limited coverage for non-English artists; iTunes is a better source but also has gaps.
 - The graph shows up to ~15 nodes to keep the layout readable; very prolific artists get truncated.
 - No user accounts or persistent preferences — the graph resets on every search.
+- The YouTube cache is ephemeral on serverless deployments (Vercel) — video lookups repeat on every cold start.
 
 ---
 
@@ -143,3 +290,5 @@ py -m pytest
 See [model_card.md](model_card.md) for a full analysis of the original simulation's strengths, biases, and future work.
 
 The jump from a scored CSV recommender to a live graph was mostly about embracing external APIs as a data source rather than a local dataset. The surprising design problem wasn't the graph layout or the audio — it was **genre detection**. A single song title like "Leadbelly" or an artist name like "MIKE" can match dozens of wrong entries across iTunes, Deezer, and MusicBrainz. The solution — anchoring every genre query to both artist name and song title, then requiring multi-vote consensus on MusicBrainz tags — is less elegant than a single API call but far more accurate. Real platforms solve this with canonical identifiers (Spotify track IDs, ISRCs); this app has to reconstruct that disambiguation from scratch on every search.
+
+The most instructive failure was the YouTube quota incident. Building with an officially-supported API felt like the right call, but the API's rate limits were designed for production traffic patterns, not iterative development. Switching to yt-dlp — a library that scrapes the same data without a key — was faster and more reliable for this use case. The tradeoff is fragility: YouTube can change its page structure at any time and break yt-dlp. For a production system, the right answer is probably a cached proxy layer in front of the official API, not a scraper.
